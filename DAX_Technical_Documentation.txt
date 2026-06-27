@@ -1,0 +1,64 @@
+===========================================================================
+ADVANCED DAX ENGINE: SECURITISATION RISK ARENA
+===========================================================================
+SECTION 1: CORE PORTFOLIO METRICS & RELATIONSHIP OVERRIDES
+MEASURE 1: DYNAMIC PORTFOLIO POOL BALANCE (Active Cutoff Allocation)
+Pool_Balance_At_Cutoff = 
+CALCULATE(
+    SUM(Fact_Auto_Loans[CurrentBalance]),
+    USERELATIONSHIP(Dim_Calendar[Date], Fact_Auto_Loans[CutoffDate])
+)
+
+SECTION 2: RECONCILIATION & REGULATORY IMPAIRMENT MODELS
+MEASURE 2: IFRS 9 TOTAL ECL PROVISION (Expected Credit Loss Model)
+IFRS9_Total_ECL_Provision = 
+SUMX(
+    Fact_Auto_Loans,
+    Fact_Auto_Loans[EAD] * Fact_Auto_Loans[PD_Estimate] * Fact_Auto_Loans[LGD_Estimate]
+)
+
+MEASURE 3: Dynamic Crisis Stress-Testing Framework (Macro Economic Shock Model)
+Stressed_ECL_Shortfall = 
+VAR Severe_Crisis_Multiplier = 1.50 // Simulating a 50% spike in default rates
+RETURN
+SUMX(
+    auto_loan_securitisation_data,
+    VAR Stressed_PD = MIN(auto_loan_securitisation_data[PD_Estimate] * Severe_Crisis_Multiplier, 1.0)
+    RETURN
+    auto_loan_securitisation_data[EAD] * Stressed_PD * auto_loan_securitisation_data[LGD_Estimate]
+)
+
+SECTION 3: VINTAGE DELINQUENCY VOLATILITY MODELS
+MEASURE 4: Vintage Delinquency Transition Roll-Rate (Current to 30+ DPD)
+Roll_Rate_Current_To_30DPD = 
+VAR Current_Cohort_Count = 
+    CALCULATE(
+        COUNT(dpd_snapshot_history[LoanID]),
+        dpd_snapshot_history[DPD_Bucket_Prior] = "Current",
+        USERELATIONSHIP(Dim_Calendar[Date], dpd_snapshot_history[SnapshotDate])
+    )
+VAR Rolled_To_Delinquent_Count = 
+    CALCULATE(
+        COUNT(dpd_snapshot_history[LoanID]),
+        dpd_snapshot_history[DPD_Bucket_Prior] = "Current",
+        dpd_snapshot_history[DPD_Bucket] IN {"1-29 dpd", "30-59 dpd", "60-89 dpd", "90+ dpd"},
+        USERELATIONSHIP(Dim_Calendar[Date], dpd_snapshot_history[SnapshotDate])
+    )
+RETURN
+    DIVIDE(Rolled_To_Delinquent_Count, Current_Cohort_Count, 0)
+
+SECTION 4: TRANCHE STRUCTURE CASH FLOW WATERFALLS
+MEASURE 5: Senior Tranche Cash Flow Waterfall Payout
+Waterfall_Senior_Tranche_Payout = 
+VAR Available_Cash = SUM(dynamic_loss_monthly[CollectionsTotal]) + SUM(dynamic_loss_monthly[ExcessSpread_Monthly])
+VAR Senior_Allocation_Target = [Pool_Balance_At_Cutoff] * 0.85 // Senior bond holders own 85% of structural stack
+RETURN
+    IF(Available_Cash >= Senior_Allocation_Target, Senior_Allocation_Target, Available_Cash)
+
+MEASURE 6: Subordinated (Mezzanine/Equity) Tranche Residual Cash Flow
+Waterfall_Subordinated_Tranche_Payout = 
+VAR Available_Cash = SUM(dynamic_loss_monthly[CollectionsTotal]) + SUM(dynamic_loss_monthly[ExcessSpread_Monthly])
+VAR Senior_Paid = [Waterfall_Senior_Tranche_Payout]
+RETURN
+    MAX(0, Available_Cash - Senior_Paid)
+
